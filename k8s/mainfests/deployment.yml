@@ -1,0 +1,22 @@
+apiVersion: app/v1
+kind: Deployment
+metadata:
+  name: go-web-app
+  namespace: go-app
+  labels:
+    app: go-web-app
+spec:
+  replicas: 1
+  selectore:
+    matchLabels:
+      app: go-web-app
+  templates:
+    metadata:
+      labels:
+        app: go-web-app
+    spec:
+      containers:
+        - name: go-web-app
+          image: jsonu/go-web-app:v1
+          ports:
+            - containerPort: 8085
