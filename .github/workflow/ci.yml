@@ -1,0 +1,115 @@
+# Name of the workflow that appears in GitHub Actions UI
+name: CI
+
+# Event that triggers the workflow
+on:
+  push:                    # Run workflow when code is pushed
+    branches:
+      - main               # Only trigger when pushing to the main branch
+    paths-ignore:          # Ignore workflow if only these files change
+      - 'README.md'        # Ignore README changes
+      - 'helm/**'          # Ignore all changes inside helm folder
+
+# Define jobs that will run in the workflow
+jobs:
+
+  # First job: Build and test Go application
+  build:
+    runs-on: ubuntu-latest   # Use latest Ubuntu runner
+
+    steps:
+    # Step 1: Checkout repository code into runner
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # Step 2: Install Go environment
+    - name: Set up Go 1.22.5
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.22.5   # Specify Go version
+
+    # Step 3: Build the Go application
+    - name: Build
+      run: go build -o go-web-app   # Compile Go code and output binary
+
+    # Step 4: Run unit tests
+    - name: Test
+      run: go test ./...            # Run tests in all directories
+
+
+  # Second job: Code quality checks
+  code-quality:
+    runs-on: ubuntu-latest          # Use Ubuntu runner
+
+    steps:
+    # Checkout repository again for this job
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # Run Go linter to check code quality
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: v1.56.2            # Version of golangci-lint
+
+
+  # Third job: Build and push Docker image
+  push:
+    runs-on: ubuntu-latest
+
+    needs: build                    # This job runs only after build job succeeds
+
+    steps:
+    # Checkout repository
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # Setup Docker Buildx for advanced Docker builds
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+
+    # Login to DockerHub registry
+    - name: Login to DockerHub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}  # DockerHub username from secrets
+        password: ${{ secrets.DOCKERHUB_TOKEN }}     # DockerHub access token from secrets
+
+    # Build Docker image and push it to DockerHub
+    - name: Build and Push action
+      uses: docker/build-push-action@v6
+      with:
+        context: .                                    # Build context (current repo)
+        file: ./Dockerfile                            # Dockerfile location
+        push: true                                    # Push image after build
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/go-web-app:${{ github.run_id }} 
+        # Tag image with GitHub run ID
+
+
+  # Fourth job: Update Helm chart with new image tag
+  update-newtag-in-helm-chart:
+    runs-on: ubuntu-latest
+
+    needs: push                 # Run this job only after Docker push job completes
+
+    steps:
+    # Checkout repository with permission to push changes
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.TOKEN }}   # Personal access token for pushing changes
+
+    # Update image tag in Helm values.yaml file
+    - name: Update tag in Helm chart
+      run: |
+        sed -i 's/tag: .*/tag: "${{ github.run_id }}"/' helm/go-web-app-chart/values.yaml
+        # Replace existing tag value with new GitHub run ID
+
+    # Commit and push updated Helm chart
+    - name: Commit and push changes
+      run: |
+        git config --global user.email "codinghub650@gmail.com"   # Set git email
+        git config --global user.name "sonuJha108"   # Set git username
+        git add helm/go-web-app-chart/values.yaml             # Stage modified file
+        git commit -m "Update tag in Helm chart"              # Commit change
+        git push                                              # Push changes to repo
